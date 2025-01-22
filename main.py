@@ -4,6 +4,7 @@ from Candidate_Ranking.Rankings import CandidateRanking
 from Algorithms.solver_pyvrp import VRPSolver
 import streamlit as st
 import time
+import pandas as pd
 
 LONG_DEPOT = 5.26860985
 LAT_DEPOT = 52.2517788
@@ -37,7 +38,7 @@ if __name__ == "__main__":
         # Calculate the distance matrix
         start_time = time.time()
         st.session_state.reduced_distance_df = algorithm.calculate_distance_matrix(
-            st.session_state.input_df_numbered, st.session_state.company_1, method="haversine"
+            st.session_state.input_df_numbered, st.session_state.company_1, method=st.session_state.distance
         )
         print("Distance matrix Ranking took:", round(time.time() - start_time, 4), "seconds")
 
@@ -60,6 +61,7 @@ if __name__ == "__main__":
                                                          st.session_state.reduced_distance_df)
 
 
+        #print(st.session_state.ranking)
         st.session_state.execute_Ranking = False
         st.session_state.show_Ranking = True
         print("Ranking took:",  round(time.time() - start_time,4), "seconds")
@@ -67,6 +69,13 @@ if __name__ == "__main__":
     if st.session_state.show_Ranking and st.session_state.input_df is not None:
         # Display the ranking
         dashboard.display_ranking()
+        csv_file, file_name = dashboard.download(type="ranking")
+        st.sidebar.download_button(
+            label='Download Ranking',
+            data=csv_file,
+            file_name=file_name,
+            mime="text/csv"
+        )
 
     # Check if VRP execution is triggered
     if st.session_state.execute_VRP and st.session_state.selected_candidate and st.session_state.input_df is not None:
@@ -77,7 +86,7 @@ if __name__ == "__main__":
             st.session_state.input_df_wdepot,
             chosen_company=st.session_state.company_1,
             candidate_name=st.session_state.selected_candidate,
-            method="haversine",
+            method=st.session_state.distance,
             computed_distances_df=st.session_state.reduced_distance_df,
         )
         print("Distance matrix VRP took:", round(time.time() - start_time,4), "seconds")
@@ -103,8 +112,23 @@ if __name__ == "__main__":
 
     if st.session_state.show_VRP and st.session_state.input_df is not None:
 
+
+
         st.write("### VRP Solution")
-        st.write(st.session_state.solution)
+        st.session_state.solution_print = pd.DataFrame(st.session_state.route, index=[f"Route_{i}" for i in range(len(st.session_state.route))])
+
+        col1, col2, col3 = st.columns([15, 1, 2.5])
+        with col1:
+            st.write(st.session_state.solution_print)
+        with col3:
+            csv_file, file_name = dashboard.download(type="vrp")
+            st.download_button(
+                label='Download VRP',
+                data=csv_file,
+                file_name=file_name,
+                mime="text/csv"
+            )
+
         #start_time_test = time.time()
         dashboard.showmap(st.session_state.route, st.session_state.input_df_wdepot)
         #print("\nTESTING UNITS", time.time() - start_time_test, "seconds\n")
