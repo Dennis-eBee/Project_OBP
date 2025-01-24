@@ -10,6 +10,9 @@ import pandas as pd
 import warnings
 import folium
 from streamlit_folium import st_folium
+from st_aggrid import AgGrid, GridOptionsBuilder
+from Dashboard.grid_builder import PINLEFT, PRECISION_TWO, draw_grid
+
 import time
 warnings.filterwarnings('ignore')
 
@@ -17,7 +20,7 @@ warnings.filterwarnings('ignore')
 class Dashboard:
     def __init__(self):
         #print("Initializing Dashboard")
-        st.set_page_config(page_title='Collaboration Dashboard', page_icon=":bar_chart", layout='wide')
+        st.set_page_config(page_title='Cross-Collaboration Dashboard', page_icon=":bar_chart", layout='wide')
         st.title(" :bar_chart: Collaboration Dashboard")
         st.markdown('<style>div.block-container{padding-top:2rem;}</style>', unsafe_allow_html=True)
 
@@ -54,6 +57,8 @@ class Dashboard:
         # Output saves
         if "ranking" not in st.session_state:
             st.session_state.ranking = None
+        if "df_display" not in st.session_state:
+            st.session_state.df_display = None
         if "vrp_solver" not in st.session_state:
             st.session_state.vrp_solver = None
         if "model" not in st.session_state:
@@ -149,34 +154,59 @@ class Dashboard:
 
     def display_ranking(self):
 
-        st.write("### Top 3 Candidates")
+        st.write("### Potential Candidates")
         top3_candidates = st.session_state.ranking.index.unique()[:3]
 
         # Display candidates in the middle
-        col1, col2, col3 = st.columns([1, 2, 1])
+        col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
+            formatter = {'Company': ('Company', {**PINLEFT, 'width': 100})}
+
+            st.write("<br>", unsafe_allow_html=True)
+            # st.write(st.session_state.ranking)
+
+            st.session_state.df_display = st.session_state.ranking.reset_index()
+            st.session_state.df_display.rename(columns={'index': 'Company'}, inplace=True)
+
+            row_number = st.number_input('Number of rows', min_value=0, value=3)
+            data = draw_grid(
+                st.session_state.df_display.head(row_number),
+                formatter=formatter,
+                fit_columns=True,
+                selection='single',  # or 'single', or None
+                use_checkbox='True',  # or False by default
+                max_height=300
+            )
+            st.session_state.selected_candidate = str(data["selected_rows"])
+
+        with col2:
+            st.write(str(st.session_state.selected_candidate['Company']), "test")
+
+        with col3:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            if st.session_state.selected_candidate is not None:
+                if col2.button("Solve VRP"):
+                    #self.solve_vrp()
+                    st.session_state.execute_VRP = True
+                    st.session_state.update2 = False
+                    st.session_state.firsttime2 = False
+
             # Use the radio button to directly update the selected candidate in session state
-            selected_candidate = st.radio("Select a Candidate:", top3_candidates)#, key="selected_candidate")
-            if selected_candidate != st.session_state.selected_candidate:
-                st.session_state.selected_candidate = selected_candidate
-                st.session_state.update2 = True
+            # selected_candidate = st.selectbox("Select a Candidate:", st.session_state.ranking.index.unique()) #top3_candidates)
+            # if selected_candidate != st.session_state.selected_candidate:
+            #     st.session_state.selected_candidate = selected_candidate
+            #     st.session_state.update2 = True
+            #
+            # if st.session_state.update2 and st.session_state.firsttime2 == False:
+            #     st.write('<div style="text-align: left; color: red; font-weight: bold; font-style: italic;">'
+            #                 'Not up-to-date! <br>'
+            #                 'Recalculate VRP. <br>'
+            #                 '<br>'
+            #                 '</div>',
+            #                 unsafe_allow_html=True
+            #              )
 
-            if st.session_state.update2 and st.session_state.firsttime2 == False:
-                st.write('<div style="text-align: left; color: red; font-weight: bold; font-style: italic;">'
-                            'Not up-to-date! <br>'
-                            'Recalculate VRP. <br>'
-                            '<br>'
-                            '</div>',
-                            unsafe_allow_html=True
-                         )
 
-        # Show the Solve VRP button if a candidate is selected
-        if selected_candidate:
-            if col2.button("Solve VRP"):
-                #self.solve_vrp()
-                st.session_state.execute_VRP = True
-                st.session_state.update2 = False
-                st.session_state.firsttime2 = False
 
 
     def download(self, type="ranking"):

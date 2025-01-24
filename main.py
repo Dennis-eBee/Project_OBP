@@ -78,7 +78,7 @@ if __name__ == "__main__":
         )
 
     # Check if VRP execution is triggered
-    if st.session_state.execute_VRP and st.session_state.selected_candidate and st.session_state.input_df is not None:
+    if st.session_state.execute_VRP and st.session_state.selected_candidate is not None and st.session_state.input_df is not None:
         start_time = time.time()
         st.session_state.input_df_wdepot = algorithm.add_depot(st.session_state.input_df_numbered, LAT_DEPOT, LONG_DEPOT)
 
