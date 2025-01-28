@@ -10,9 +10,10 @@ import numpy as np
 from Candidate_Ranking.ranking_methods import CandidateRanking
 from VRP_Solver.solver_pyvrp import VRPSolver
 import random
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from scipy.spatial.distance import pdist
 from sklearn.preprocessing import StandardScaler
+from VRP_Solver.distance_calculator import RoadDistanceCalculator
 
 
 class DataFramePreparer:
@@ -58,7 +59,7 @@ class DataFramePreparer:
         #Get total greedy distance
         ranking = CandidateRanking()
         predicted_ranking_greedy = ranking.greedy(sliced_distance_matrix_ranking,chosen_company)
-        total_greedy_dist = predicted_ranking_greedy.loc[chosen_candidate][0]
+        total_greedy_dist = predicted_ranking_greedy.loc[chosen_candidate].iloc[0]
 
         #Get total route lenght based on distance matrix by summing sequential movements
         route_sequence = sliced_distance_matrix_vrp.index.tolist()
@@ -134,7 +135,7 @@ class DataFramePreparer:
         radius = distances.mean()
 
         # Creating ranking df
-        ranking_df = pd.DataFrame({'Percentage Overlap': 0}, index=partner_names)
+        ranking_df = pd.DataFrame({'Percentage Overlap': 0}, index=partner_names, dtype='float')
         partner_names = partner_names.drop(partner_names[partner_names == 'Depot'])
         # Calculate overlap percentages
         for partner in partner_names:
@@ -146,6 +147,7 @@ class DataFramePreparer:
                                                        row['lon'])
                 if distance <= radius:
                     count += 1
+
             ranking_df.loc[partner, 'Percentage Overlap'] = count / len(df_temp)
 
         ranking = ranking_df.sort_values(by=['Percentage Overlap'], ascending=False)
@@ -201,7 +203,7 @@ class DataFramePreparer:
             "Max_to_depot": max_distance,
             "Min_to_depot": min_distance,
             "vehicle_cap": truck_cap,
-            "average_percentage_in_circle": average_deliveries_in_circle[0],
+            "average_percentage_in_circle": average_deliveries_in_circle.values[0],
             "mean_distance_within_circle": mean_distance_within_circle,
             "delivery_density": delivery_density,
             "radius": mean_distance_to_midpoint,
@@ -331,7 +333,7 @@ class DataFramePreparer:
             "number_stops": num_stops,
             "Max_to_depot": max_distance,
             "Min_to_depot": min_distance,
-            "average_overlap_percentage": average_overlap[0],
+            "average_overlap_percentage": average_overlap.values[0],
             "average_cluster_size": average_cluster_size,
             "average_centroid_distance": average_centroid_distance,
             "average_distance_within_clusters": a,
@@ -346,35 +348,103 @@ class DataFramePreparer:
 
         return results_row
 
+    def get_features_dbscan(self, df_input, df_input_modified, full_squared_matrix, sliced_distance_matrix_vrp,
+                            max_truck_cap, chosen_company, chosen_candidate, eps, ms):
+        # Get random truck capacity
+        truck_cap = random.choice(list(range(2, max_truck_cap + 1, 1)))
 
+        # Get total dbscan percentage
+        ranking = CandidateRanking()
+        df_copy = df_input.copy()
 
+        # Make DBSCAN
+        dbscan = DBSCAN(eps=eps, min_samples=ms, metric='precomputed')
 
+        # Assign clusters
+        clusters = dbscan.fit_predict(full_squared_matrix)
+        df_copy['cluster'] = clusters
 
-    # # Simple retry logic in place when calling the function
-    # max_retries = 6
-    # wait_time = 30  # 60 seconds before retrying
-    #
-    # for attempt in range(max_retries):
-    #     try:
-    #         print(f"Attempt {attempt + 1} of {max_retries} to calculate the distance matrix...")
-    #         distance_matrix_ranking = distance_calc.calculate_distance_matrix(
-    #             input_df,
-    #             chosen_company=chosen_company,
-    #             candidate_name=None,
-    #             method="osrm",
-    #             computed_distances_df=None
-    #         )
-    #         print("Distance matrix calculated successfully.")
-    #         break  # If successful, exit the retry loop
-    #     except ConnectionError as e:
-    #         print(f"Connection failed: {e}")
-    #         if attempt < max_retries - 1:
-    #             print(f"Retrying in {wait_time} seconds...")
-    #             time.sleep(wait_time)
-    #         else:
-    #             print("Max retries reached. Failed to calculate distance matrix.")
-    #             distance_matrix_ranking = None  # Ensure a value is assigned in case of failure
-    # else:
-    #     print("Error: No distance matrix was calculated.")
+        # Handle noise
+        df_noise_assign = ranking._assign_noise_points(df_copy, chosen_company, True)
+        noise_points_amount = len(df_noise_assign[df_noise_assign['cluster'] == -1])  # Feature amount noise points
+        df_filter_noise = df_noise_assign[df_noise_assign['cluster'] != -1].reset_index(drop=True)
 
-    # Data collection for results
+        # Features percentage overlap and number of clusters
+        percentages = ranking._get_percentages(df_filter_noise, chosen_company)
+        overlap_percentage = percentages[percentages['name'] == chosen_candidate]['Percentage'].values[0]
+        num_clusters = len(np.unique(clusters))
+
+        # Features avg/max/min distance from points to centroid of clusters
+        cluster_midpoints = (
+            df_filter_noise.groupby('cluster')[['lat', 'lon']].mean()
+            .rename(columns={'lat': 'mid_lat', 'lon': 'mid_lon'})
+        )
+
+        dist_calc = RoadDistanceCalculator()
+        df_new = df_filter_noise.merge(cluster_midpoints, how='left', left_on='cluster', right_index=True)
+        df_new['distance_to_centroid'] = np.zeros(len(df_new))
+        for i in range(len(df_new)):
+            df_new.loc[i, 'distance_to_centroid'] = dist_calc._calculate_distance_haversine(
+                (df_new['lat'][i], df_new['lon'][i]),
+                (df_new['mid_lat'][i], df_new['mid_lon'][i]))
+
+        # Centroid features
+        avg_distance_points_to_centroid = df_new['distance_to_centroid'].mean()
+        max_distance_points_to_centroid = df_new['distance_to_centroid'].max()
+        min_distance_points_to_centroid = df_new['distance_to_centroid'].min()
+
+        # Get total route length based on distance matrix by summing sequential movements
+        route_sequence = sliced_distance_matrix_vrp.index.tolist()
+        total_route_distance = sum(
+            sliced_distance_matrix_vrp.loc[route_sequence[i], route_sequence[i + 1]]
+            for i in range(len(route_sequence) - 1)
+        )
+
+        # Get the number of locations
+        num_stops = len(sliced_distance_matrix_vrp.columns) - 1
+
+        # Calculate minimum and maximum distances from the depot
+        depot_distances = sliced_distance_matrix_vrp.loc['Depot'].copy().drop('Depot')  # Drop self-distance
+        min_distance = depot_distances.min()
+        max_distance = depot_distances.max()
+
+        # Solve the vrp to get real distance per order
+        vrp_solver = VRPSolver()
+        model_collab, current_names_collab = vrp_solver.build_model(
+            input_df=df_input_modified,
+            chosen_company=chosen_company,
+            chosen_candidate=chosen_candidate,
+            distance_matrix=sliced_distance_matrix_vrp,
+            truck_capacity=truck_cap
+        )
+        solution_collab, routes_collab = vrp_solver.solve(
+            model=model_collab,
+            max_runtime=1,
+            display=False,
+            current_names=current_names_collab
+        )
+
+        total_distance_collab, avg_distance_per_order_collab = vrp_solver.calculate_distance_per_order(
+            routes=routes_collab,
+            distance_matrix=sliced_distance_matrix_vrp
+        )
+
+        # Append results to list
+        results_row = {
+            "totalsum": total_route_distance,
+            "number_stops": num_stops,
+            "percentage_overlap": overlap_percentage,
+            "number_clusters": num_clusters,
+            "avg_distance_points_to_centroid": avg_distance_points_to_centroid,
+            "max_distance_points_to_centroid": max_distance_points_to_centroid,
+            "min_distance_points_to_centroid": min_distance_points_to_centroid,
+            "amount_noise_points": noise_points_amount,
+            "Max_to_depot": max_distance,
+            "Min_to_depot": min_distance,
+            "vehicle_cap": truck_cap,
+            "real_km_order": avg_distance_per_order_collab,
+            "chosen_company": chosen_company,
+            "chosen_candidate": chosen_candidate
+        }
+
+        return results_row

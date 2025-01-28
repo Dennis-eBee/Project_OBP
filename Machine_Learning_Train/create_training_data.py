@@ -20,9 +20,11 @@ import pandas as pd
 LONG_DEPOT = 5.26860985
 LAT_DEPOT = 52.2517788
 METHOD = "osrm"
-RANKING = "greedy" #bounding_circle or #greedy
+RANKING = "dbscan"
 AMOUNT_OF_ROWS_TO_GENERATE = 10_000
 MAX_TRUCK_CAP = 20
+EPS = 17
+MIN_SAMPLES = 7
 
 if __name__ == "__main__":
 
@@ -34,7 +36,7 @@ if __name__ == "__main__":
     input_df4 = pd.read_csv("Data/manyLarge.csv")
 
     #Combine all dataframes, preserving duplicates within the same DataFrame
-    dfs = [input_df1, input_df2,input_df4, input_df3]
+    dfs = [input_df1, input_df2, input_df4, input_df3]
 
     ###make correct split (make sure to save the split dfs)
     preparer = DataFramePreparer()
@@ -63,6 +65,11 @@ if __name__ == "__main__":
         df_input_clustering = transformer.drop_duplicates(training_df)
         full_distance_matrix = distance_calc.calculate_full_distance_matrix(input_df_modified_with_depot, method=METHOD)
         squared_distance_df_kmeans = distance_calc.calculate_square_matrix(input_df_modified_with_depot)
+    elif RANKING == "dbscan":
+        df_input_clustering = transformer.drop_duplicates(training_df)
+        full_distance_matrix = distance_calc.calculate_full_distance_matrix(input_df_modified_with_depot, method=METHOD)
+        squared_distance_df_dbscan = distance_calc.calculate_square_matrix(input_df_modified)
+
 
     rows = []
     unique_companies = training_df['name'].unique()
@@ -87,6 +94,10 @@ if __name__ == "__main__":
             row = preparer.get_features_bounding_circle(training_df, input_df_modified, distance_matrix_ranking, distance_matrix_vrp, MAX_TRUCK_CAP,chosen_company, chosen_candidate)
         elif RANKING == "k_means":
             row = preparer.get_features_k_means(df_input_clustering, input_df_modified, squared_distance_df_kmeans, distance_matrix_vrp, MAX_TRUCK_CAP, chosen_company, chosen_candidate)
+        elif RANKING == "dbscan":
+            row = preparer.get_features_dbscan(df_input_clustering, input_df_modified, squared_distance_df_dbscan,
+                                               distance_matrix_vrp, MAX_TRUCK_CAP, chosen_company, chosen_candidate,
+                                               EPS,MIN_SAMPLES)
 
         rows.append(row)
 
